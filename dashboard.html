@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FallGuard Family — แดชบอร์ด</title>
+<link rel="stylesheet" href="style.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  .camera-section { margin-bottom: 36px; }
+  .camera-card {
+    background: #1A2A30;
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .camera-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    background: rgba(255,255,255,0.04);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+  .camera-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #A8C4CC;
+  }
+  .cam-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #888;
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+  .cam-dot.online {
+    background: #4CAF50;
+    box-shadow: 0 0 6px #4CAF50;
+    animation: blink 2s ease-in-out infinite;
+  }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  .camera-device-id { font-size: 12px; color: #5A7A82; }
+  .camera-feed-wrapper {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16/9;
+    background: #0D1A1F;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #camera-feed {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .camera-offline-msg {
+    position: absolute; inset: 0;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: #5A7A82;
+    font-size: 14px;
+    background: #0D1A1F;
+  }
+  .camera-offline-msg .icon { font-size: 36px; }
+  .camera-offline-msg.show { display: flex; }
+</style>
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="topbar-brand">
+      <span class="pulse-ring small"></span>
+      <span class="pulse-dot small"></span>
+      <span class="topbar-title">FallGuard Family</span>
+    </div>
+    <div class="topbar-actions">
+      <span id="user-email" class="user-email"></span>
+      <button id="btn-notify" class="btn btn-small btn-outline">เปิดการแจ้งเตือน</button>
+      <button id="btn-logout" class="btn btn-small btn-ghost">ออกจากระบบ</button>
+    </div>
+  </header>
+
+  <main class="dashboard">
+
+    <section class="panel" id="panel-no-group">
+      <h2>เข้าร่วมเครือข่ายครอบครัว</h2>
+      <p class="panel-sub">สร้างกลุ่มใหม่ หรือกรอกรหัสเชิญที่ญาติส่งให้</p>
+      <div class="split-grid">
+        <div class="card">
+          <h3>สร้างกลุ่มใหม่</h3>
+          <label for="group-name">ชื่อกลุ่ม</label>
+          <input type="text" id="group-name" placeholder="เช่น บ้านคุณยาย">
+          <button id="btn-create-group" class="btn btn-primary">สร้างกลุ่ม</button>
+        </div>
+        <div class="card">
+          <h3>เข้าร่วมกลุ่มที่มีอยู่</h3>
+          <label for="invite-code">รหัสเชิญ</label>
+          <input type="text" id="invite-code" placeholder="รหัส 6 หลัก" maxlength="6" style="text-transform:uppercase">
+          <button id="btn-join-group" class="btn btn-secondary">เข้าร่วมกลุ่ม</button>
+        </div>
+      </div>
+      <p id="group-status" class="status-text" hidden></p>
+    </section>
+
+    <section class="panel" id="panel-group" hidden>
+
+      <div class="group-header">
+        <div>
+          <p class="eyebrow">เครือข่ายของคุณ</p>
+          <h2 id="active-group-name">—</h2>
+        </div>
+        <div class="invite-badge">
+          <span class="invite-label">รหัสเชิญ</span>
+          <span id="active-invite-code" class="invite-code">—</span>
+        </div>
+      </div>
+
+      <!-- กล้องวงจรปิด -->
+      <div class="camera-section">
+        <div class="camera-card">
+          <div class="camera-header">
+            <div class="camera-label">
+              <span class="cam-dot" id="cam-dot"></span>
+              กล้องวงจรปิด
+            </div>
+            <span class="camera-device-id">living-room-cam-01</span>
+          </div>
+          <div class="camera-feed-wrapper">
+            <img id="camera-feed" alt="กล้องวงจรปิด">
+            <div class="camera-offline-msg show" id="camera-offline">
+              <span class="icon">📷</span>
+              <span>กล้องออฟไลน์</span>
+              <span style="font-size:12px">รัน camera_stream.py เพื่อเริ่มสตรีม</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h3 class="section-title">ประวัติการแจ้งเตือน</h3>
+      <div id="alert-list" class="alert-list">
+        <p class="empty-state">ยังไม่มีการแจ้งเตือน ระบบจะแสดงที่นี่ทันทีเมื่อตรวจพบการล้ม</p>
+      </div>
+
+    </section>
+  </main>
+
+  <script>
+    const STREAM_URL = "http://localhost:8000/stream/video";
+    const feedImg = document.getElementById("camera-feed");
+    const offlineMsg = document.getElementById("camera-offline");
+    const camDot = document.getElementById("cam-dot");
+
+    function setOnline() {
+      offlineMsg.classList.remove("show");
+      camDot.classList.add("online");
+    }
+
+    function setOffline() {
+      offlineMsg.classList.add("show");
+      camDot.classList.remove("online");
+      // ลองโหลดใหม่ทุก 5 วินาที
+      setTimeout(startStream, 5000);
+    }
+
+    function startStream() {
+      // ใส่ src ตรงๆ แล้วรอ event จากตัวรูปภาพเอง
+      feedImg.src = "";
+      feedImg.src = STREAM_URL + "?t=" + Date.now();
+    }
+
+    feedImg.addEventListener("load", setOnline);
+    feedImg.addEventListener("error", setOffline);
+
+    // เริ่มโหลดเมื่อ panel-group แสดงขึ้นมา
+    const panelObserver = new MutationObserver(() => {
+      const panel = document.getElementById("panel-group");
+      if (panel && !panel.hidden) {
+        startStream();
+        panelObserver.disconnect();
+      }
+    });
+    panelObserver.observe(document.body, { attributes: true, subtree: true });
+  </script>
+
+  <script type="module" src="firebase-config.js"></script>
+  <script type="module" src="dashboard.js"></script>
+</body>
+</html>
