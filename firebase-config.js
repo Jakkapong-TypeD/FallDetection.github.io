@@ -30,4 +30,4 @@ export const db = getFirestore(app);
 export const messaging = getMessaging(app);
 
 // URL ของ backend (FastAPI) — ตอนทดสอบในเครื่องเดียวกันใช้ localhost ได้เลย
-export const BACKEND_URL = "http://localhost:8000";
+export const BACKEND_URL = "https://jakkapong-typed.github.io/BACKEND.github.io/";
