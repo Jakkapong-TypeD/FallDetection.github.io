@@ -1,1 +1,42 @@
-nnn
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FallGuard Family — เข้าสู่ระบบ</title>
+<link rel="stylesheet" href="style.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <div class="auth-page">
+    <div class="auth-card">
+      <div class="brand">
+        <div class="brand-mark">
+          <span class="pulse-ring"></span>
+          <span class="pulse-dot"></span>
+        </div>
+        <h1>FallGuard <em>Family</em></h1>
+        <p class="brand-sub">คอยดูแลคนที่คุณรัก แม้ไม่ได้อยู่ใกล้</p>
+      </div>
+
+      <form id="auth-form" class="auth-form">
+        <label for="email">อีเมล</label>
+        <input type="email" id="email" placeholder="you@example.com" required>
+
+        <label for="password">รหัสผ่าน</label>
+        <input type="password" id="password" placeholder="อย่างน้อย 6 ตัวอักษร" required minlength="6">
+
+        <p id="auth-error" class="error-text" hidden></p>
+
+        <button type="submit" id="btn-signin" class="btn btn-primary">เข้าสู่ระบบ</button>
+        <button type="button" id="btn-signup" class="btn btn-ghost">สมัครสมาชิกใหม่</button>
+      </form>
+    </div>
+  </div>
+
+  <script type="module" src="firebase-config.js"></script>
+  <script type="module" src="auth.js"></script>
+</body>
+</html>
