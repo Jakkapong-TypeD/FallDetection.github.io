@@ -2,7 +2,8 @@
 import { auth, db, messaging, VAPID_KEY, BACKEND_URL } from "./firebase-config.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  collection, query, where, orderBy, limit, onSnapshot, getDocs
+  collection, query, where, orderBy, limit, onSnapshot, getDocs,
+  addDoc, doc, updateDoc, deleteDoc, serverTimestamp, increment
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getToken, onMessage } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js";
 
@@ -20,10 +21,37 @@ const els = {
   activeGroupName: document.getElementById("active-group-name"),
   activeInviteCode: document.getElementById("active-invite-code"),
   alertList: document.getElementById("alert-list"),
+
+  // กล้อง
+  cameraFeed: document.getElementById("camera-feed"),
+  cameraOffline: document.getElementById("camera-offline"),
+  camDot: document.getElementById("cam-dot"),
+
+  // แจ้งเตือนการกินยา
+  btnAddMed: document.getElementById("btn-add-med"),
+  medList: document.getElementById("med-list"),
+  medEmpty: document.getElementById("med-empty"),
+  medModal: document.getElementById("med-modal"),
+  medModalTitle: document.getElementById("med-modal-title"),
+  medForm: document.getElementById("med-form"),
+  medName: document.getElementById("med-name"),
+  medDose: document.getElementById("med-dose"),
+  medStock: document.getElementById("med-stock"),
+  medNote: document.getElementById("med-note"),
+  medBedtime: document.getElementById("med-bedtime"),
+  mealGroup: document.getElementById("meal-group"),
+  bedtimeGroup: document.getElementById("bedtime-group"),
+  mealError: document.getElementById("meal-error"),
+  btnMedCancel: document.getElementById("btn-med-cancel"),
 };
 
 let currentUser = null;
 let unsubscribeAlerts = null;
+let unsubscribeMedications = null;
+let currentGroupId = null;
+let medications = []; // แคชรายการยาล่าสุดจาก Firestore (sync กับทุกคนในกลุ่มแบบเรียลไทม์)
+let editingMedId = null;
+let notifiedThisSession = {}; // กันแจ้งเตือนซ้ำในแท็บนี้ (key: medId_slotId_YYYY-MM-DD)
 
 // ---------- Auth guard ----------
 onAuthStateChanged(auth, async (user) => {
@@ -69,6 +97,13 @@ function resetGroupView() {
     unsubscribeAlerts();
     unsubscribeAlerts = null;
   }
+  if (unsubscribeMedications) {
+    unsubscribeMedications();
+    unsubscribeMedications = null;
+  }
+  currentGroupId = null;
+  medications = [];
+  stopStream();
   els.panelGroup.hidden = true;
   els.panelNoGroup.hidden = false;
   els.groupStatus.hidden = true;
@@ -79,7 +114,10 @@ function showGroupPanel(groupId, groupName, inviteCode) {
   els.panelGroup.hidden = false;
   els.activeGroupName.textContent = groupName;
   els.activeInviteCode.textContent = inviteCode || "—";
+  currentGroupId = groupId;
   listenForAlerts(groupId);
+  listenForMedications(groupId);
+  startStream(groupId);
   addLeaveGroupButton(groupId);
 }
 
@@ -164,6 +202,49 @@ function addLeaveGroupButton(groupId) {
   els.alertList.after(btn);
 }
 
+// ---------- กล้องวงจรปิด ----------
+// หมายเหตุ: เดิม STREAM_URL ผูกไว้กับ http://localhost:8000 ตรงๆ ซึ่งจะเห็น
+// ภาพได้เฉพาะตอนเปิดหน้านี้ "บนเครื่องเดียวกัน" กับที่รัน camera_stream.py
+// เท่านั้น สมาชิกครอบครัวคนอื่นที่ล็อกอินจากที่อื่นจะไม่เห็นภาพเลย
+// ด้านล่างนี้เปลี่ยนให้ดึงจาก BACKEND_URL (ใช้ตัวเดียวกับ endpoint อื่นๆ)
+// พร้อมแนบ group_id เพื่อให้ backend รู้ว่าต้อง proxy กล้องตัวไหนของกลุ่มไหน
+// แต่ทั้งนี้ backend เองก็ต้องรันอยู่ในที่ที่ทุกคนเข้าถึงได้ทางอินเทอร์เน็ต
+// (ไม่ใช่ localhost) และต้องมี route ที่ map group_id -> กล้องจริงด้วย
+// ผมยังไม่เห็นโค้ด backend เลยแก้ให้แค่ฝั่ง frontend ตรงนี้ก่อนครับ
+let streamRetryTimer = null;
+
+function setCameraOnline() {
+  els.cameraOffline.classList.remove("show");
+  els.camDot.classList.add("online");
+}
+
+function setCameraOffline() {
+  els.cameraOffline.classList.add("show");
+  els.camDot.classList.remove("online");
+  if (streamRetryTimer) clearTimeout(streamRetryTimer);
+  streamRetryTimer = setTimeout(() => startStream(currentGroupId), 5000);
+}
+
+function startStream(groupId) {
+  if (!groupId) return;
+  const url = `${BACKEND_URL}/stream/video?group_id=${encodeURIComponent(groupId)}`;
+  els.cameraFeed.src = "";
+  els.cameraFeed.src = url + "&t=" + Date.now();
+}
+
+function stopStream() {
+  if (streamRetryTimer) {
+    clearTimeout(streamRetryTimer);
+    streamRetryTimer = null;
+  }
+  els.cameraFeed.src = "";
+  els.cameraOffline.classList.add("show");
+  els.camDot.classList.remove("online");
+}
+
+els.cameraFeed.addEventListener("load", setCameraOnline);
+els.cameraFeed.addEventListener("error", setCameraOffline);
+
 // ---------- Push notifications ----------
 els.btnNotify.addEventListener("click", async () => {
   try {
@@ -239,3 +320,303 @@ function listenForAlerts(groupId) {
     });
   });
 }
+
+// =========================================================
+// แจ้งเตือนการกินยา (Medication Reminders)
+// ---------------------------------------------------------
+// เก็บใน Firestore collection "medications" (ผูกกับ group_id
+// แบบเดียวกับ fall_alerts) และ sync แบบเรียลไทม์ผ่าน onSnapshot
+// เพื่อให้สมาชิกทุกคนในกลุ่ม ไม่ว่าจะล็อกอินด้วยอีเมลไหน หรือ
+// เปิดจากอุปกรณ์ไหน เห็นรายการยาและสถานะ "กินแล้ว" ตรงกันทันที
+//
+// ต้องเพิ่ม Firestore Security Rule ให้ collection นี้ด้วย
+// (ตัวอย่าง ปรับ field ให้ตรงกับ rule ของ family_groups/fall_alerts
+// ที่มีอยู่แล้ว):
+//
+//   match /medications/{medId} {
+//     allow read, write: if request.auth != null &&
+//       request.auth.uid in get(/databases/$(database)/documents/family_groups/$(resource.data.group_id)).data.member_user_ids;
+//   }
+//
+// (สำหรับ create ที่ resource.data ยังไม่มี ให้เช็คจาก request.resource.data.group_id แทน)
+// =========================================================
+
+const TIMING_LABEL = { before_meal: "ก่อนอาหาร", after_meal: "หลังอาหาร", before_bed: "ก่อนนอน" };
+const MEAL_LABEL = { morning: "เช้า", noon: "กลางวัน", evening: "เย็น" };
+
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+function minutesNow() {
+  const d = new Date();
+  return d.getHours() * 60 + d.getMinutes();
+}
+function toMinutes(hhmm) {
+  if (!hhmm) return null;
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 60 + m;
+}
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str || "";
+  return div.innerHTML;
+}
+function getDoseSlots(med) {
+  if (med.timing === "before_bed") {
+    return [{ slotId: "bed", label: "ก่อนนอน", time: med.bedtime }];
+  }
+  return (med.meals || []).map((m) => ({
+    slotId: m.meal,
+    label: MEAL_LABEL[m.meal] + (med.timing === "before_meal" ? " (ก่อนอาหาร)" : " (หลังอาหาร)"),
+    time: m.time,
+  }));
+}
+
+// ---------- Realtime sync จาก Firestore ----------
+function listenForMedications(groupId) {
+  if (unsubscribeMedications) {
+    unsubscribeMedications();
+    unsubscribeMedications = null;
+  }
+  const q = query(collection(db, "medications"), where("group_id", "==", groupId));
+  unsubscribeMedications = onSnapshot(q, (snapshot) => {
+    medications = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+    renderMedications();
+    checkDueReminders();
+  });
+}
+
+// ---------- แสดงผลรายการยา ----------
+function renderMedications() {
+  els.medList.querySelectorAll(".med-item").forEach((n) => n.remove());
+
+  if (medications.length === 0) {
+    els.medEmpty.style.display = "block";
+    return;
+  }
+  els.medEmpty.style.display = "none";
+
+  const nowMin = minutesNow();
+  const today = todayStr();
+
+  medications.forEach((med) => {
+    const slots = getDoseSlots(med);
+    const takenToday = (med.taken && med.taken[today]) || {};
+
+    const item = document.createElement("div");
+    item.className = "med-item";
+    item.dataset.id = med.id;
+
+    const isDue = slots.some((s) => {
+      const t = toMinutes(s.time);
+      if (t === null) return false;
+      return !takenToday[s.slotId] && nowMin >= t && nowMin - t <= 15;
+    });
+    if (isDue) item.classList.add("due");
+
+    const hasStock = med.stock !== null && med.stock !== undefined && med.stock !== "";
+    const stockLow = hasStock && Number(med.stock) <= 5;
+
+    item.innerHTML = `
+      <div class="med-item-top">
+        <div>
+          <div class="med-name-row">
+            <span class="med-name">${escapeHtml(med.name)}</span>
+            ${med.dose ? `<span class="med-dose">${escapeHtml(med.dose)}</span>` : ""}
+            <span class="med-badge">${TIMING_LABEL[med.timing]}</span>
+          </div>
+          ${med.note ? `<div class="med-note">${escapeHtml(med.note)}</div>` : ""}
+          ${stockLow ? `<div class="med-note med-stock-low">เหลือ ${escapeHtml(String(med.stock))} เม็ด/โดส — ใกล้หมด</div>` : ""}
+        </div>
+        <div class="med-actions">
+          <button class="med-icon-btn med-edit" title="แก้ไข">✏️</button>
+          <button class="med-icon-btn med-delete" title="ลบ">🗑️</button>
+        </div>
+      </div>
+      <div class="med-times"></div>
+    `;
+
+    const timesEl = item.querySelector(".med-times");
+    slots.forEach((s) => {
+      const taken = !!takenToday[s.slotId];
+      const chip = document.createElement("label");
+      chip.className = "med-time-chip" + (taken ? " taken" : "");
+      chip.innerHTML = `<input type="checkbox" ${taken ? "checked" : ""}> ${s.time || "--:--"} · ${s.label}`;
+      chip.querySelector("input").addEventListener("change", (e) => toggleTaken(med, s.slotId, e.target.checked));
+      timesEl.appendChild(chip);
+    });
+
+    item.querySelector(".med-edit").addEventListener("click", () => openMedModal(med));
+    item.querySelector(".med-delete").addEventListener("click", () => deleteMed(med.id));
+
+    els.medList.appendChild(item);
+  });
+}
+
+// ---------- ทำเครื่องหมายว่ากินยาแล้ว/ยัง (sync ให้ทุกคนเห็นทันที) ----------
+async function toggleTaken(med, slotId, taken) {
+  const today = todayStr();
+  const update = { [`taken.${today}.${slotId}`]: taken };
+
+  const hasStock = med.stock !== null && med.stock !== undefined && med.stock !== "";
+  if (hasStock) {
+    update.stock = increment(taken ? -1 : 1);
+  }
+
+  try {
+    await updateDoc(doc(db, "medications", med.id), update);
+  } catch (err) {
+    alert("บันทึกสถานะกินยาไม่สำเร็จ: " + err.message);
+  }
+}
+
+// ---------- เพิ่ม/แก้ไข/ลบยา ----------
+function updateTimingVisibility() {
+  const timing = els.medForm.querySelector('input[name="timing"]:checked').value;
+  if (timing === "before_bed") {
+    els.mealGroup.style.display = "none";
+    els.bedtimeGroup.style.display = "block";
+  } else {
+    els.mealGroup.style.display = "block";
+    els.bedtimeGroup.style.display = "none";
+  }
+}
+els.medForm.querySelectorAll('input[name="timing"]').forEach((r) => r.addEventListener("change", updateTimingVisibility));
+
+function openMedModal(med) {
+  editingMedId = med ? med.id : null;
+  els.medModalTitle.textContent = med ? "แก้ไขรายการยา" : "เพิ่มรายการยา";
+  els.medName.value = med ? med.name : "";
+  els.medDose.value = med ? med.dose || "" : "";
+  els.medStock.value = med && med.stock !== undefined ? med.stock : "";
+  els.medNote.value = med ? med.note || "" : "";
+
+  const timing = med ? med.timing : "before_meal";
+  els.medForm.querySelector(`input[name="timing"][value="${timing}"]`).checked = true;
+
+  els.medForm.querySelectorAll(".meal-slot").forEach((slot) => {
+    const mealKey = slot.dataset.meal;
+    const check = slot.querySelector(".meal-check");
+    const timeInput = slot.querySelector(".meal-time");
+    if (med && med.meals) {
+      const found = med.meals.find((m) => m.meal === mealKey);
+      check.checked = !!found;
+      if (found) timeInput.value = found.time;
+    } else {
+      check.checked = mealKey === "morning" || mealKey === "evening";
+    }
+  });
+  els.medBedtime.value = med && med.bedtime ? med.bedtime : "21:00";
+
+  els.mealError.classList.remove("show");
+  updateTimingVisibility();
+  els.medModal.classList.add("show");
+  els.medName.focus();
+}
+
+function closeMedModal() {
+  els.medModal.classList.remove("show");
+  editingMedId = null;
+  els.medForm.reset();
+}
+
+els.btnAddMed.addEventListener("click", () => openMedModal(null));
+els.btnMedCancel.addEventListener("click", closeMedModal);
+els.medModal.addEventListener("click", (e) => {
+  if (e.target === els.medModal) closeMedModal();
+});
+
+els.medForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!currentGroupId) return;
+
+  const timing = els.medForm.querySelector('input[name="timing"]:checked').value;
+  let meals = [];
+  let bedtime = null;
+
+  if (timing === "before_bed") {
+    bedtime = els.medBedtime.value;
+  } else {
+    els.medForm.querySelectorAll(".meal-slot").forEach((slot) => {
+      if (slot.querySelector(".meal-check").checked) {
+        meals.push({ meal: slot.dataset.meal, time: slot.querySelector(".meal-time").value });
+      }
+    });
+    if (meals.length === 0) {
+      els.mealError.classList.add("show");
+      return;
+    }
+  }
+  els.mealError.classList.remove("show");
+
+  const stockVal = els.medStock.value;
+  const payload = {
+    group_id: currentGroupId,
+    name: els.medName.value.trim(),
+    dose: els.medDose.value.trim(),
+    timing,
+    meals,
+    bedtime,
+    stock: stockVal === "" ? "" : Number(stockVal),
+    note: els.medNote.value.trim(),
+  };
+
+  const submitBtn = els.medForm.querySelector('button[type="submit"]');
+  submitBtn.disabled = true;
+  try {
+    if (editingMedId) {
+      await updateDoc(doc(db, "medications", editingMedId), payload);
+    } else {
+      payload.taken = {};
+      payload.created_by = currentUser.uid;
+      payload.created_at = serverTimestamp();
+      await addDoc(collection(db, "medications"), payload);
+    }
+    closeMedModal();
+  } catch (err) {
+    alert("บันทึกรายการยาไม่สำเร็จ: " + err.message);
+  } finally {
+    submitBtn.disabled = false;
+  }
+});
+
+async function deleteMed(medId) {
+  if (!confirm("ลบรายการยานี้ใช่หรือไม่?")) return;
+  try {
+    await deleteDoc(doc(db, "medications", medId));
+  } catch (err) {
+    alert("ลบรายการยาไม่สำเร็จ: " + err.message);
+  }
+}
+
+// ---------- ตรวจสอบเวลาที่ต้องแจ้งเตือน ----------
+// หมายเหตุ: นี่คือการแจ้งเตือนฝั่ง client (ใช้ได้เมื่อเปิดแท็บนี้ค้างไว้
+// และกดปุ่ม "เปิดการแจ้งเตือน" อนุญาต permission ไปแล้วเท่านั้น)
+// ถ้าต้องการ push แจ้งเตือนไปหาทุกคนในกลุ่มแม้ปิดแอปอยู่ (เหมือนที่ระบบ
+// แจ้งเตือนการล้มทำผ่าน FCM) ต้องมี Cloud Function ฝั่ง backend คอย
+// เช็คตารางยาเป็นระยะแล้วยิง FCM ไปยัง fcm_token ของสมาชิกกลุ่ม —
+// ส่วนนี้ผมยังไม่เห็นโค้ด backend จึงยังทำให้ไม่ได้ในตอนนี้ครับ
+function checkDueReminders() {
+  const nowMin = minutesNow();
+  const today = todayStr();
+
+  medications.forEach((med) => {
+    const takenToday = (med.taken && med.taken[today]) || {};
+    getDoseSlots(med).forEach((s) => {
+      const t = toMinutes(s.time);
+      if (t === null) return;
+      const key = `${med.id}_${s.slotId}_${today}`;
+      if (!takenToday[s.slotId] && !notifiedThisSession[key] && nowMin >= t && nowMin - t <= 5) {
+        notifiedThisSession[key] = true;
+        const msg = `ถึงเวลากินยา "${med.name}" (${s.label})`;
+        if (window.Notification && Notification.permission === "granted") {
+          new Notification("FallGuard Family — แจ้งเตือนกินยา", { body: msg });
+        }
+      }
+    });
+  });
+}
+
+setInterval(() => {
+  if (currentGroupId) checkDueReminders();
+}, 30000);
