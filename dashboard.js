@@ -372,7 +372,7 @@ els.btnNotify.addEventListener("click", async () => {
       return;
     }
 
-    const registration = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
+    const registration = await navigator.serviceWorker.register("./firebase-messaging-sw.js");
     await navigator.serviceWorker.ready;
 
     const token = await getToken(messaging, {
