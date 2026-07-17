@@ -1,27 +1,44 @@
-// firebase-messaging-sw.js
-// ต้องอยู่ที่ root ของเว็บ (โฟลเดอร์เดียวกับ index.html) ห้ามย้ายเข้าโฟลเดอร์ย่อย
-// ทำหน้าที่รับ push notification ตอนที่ไม่ได้เปิดแท็บเว็บอยู่
+importScripts(
+  "https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"
+);
 
-importScripts("https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js");
-importScripts("https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js");
+importScripts(
+  "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"
+);
 
-// ใส่ค่าเดียวกับใน firebase-config.js (ไฟล์นี้เป็น service worker เรียก import module ไม่ได้ ต้องคัดลอกค่ามาซ้ำ)
 firebase.initializeApp({
-  apiKey: "AIzaSyALBqEc_ZKvXCoi51uhtYyIJhoi_4rpptc",
-  authDomain: "fallguard-family.firebaseapp.com",
-  projectId: "fallguard-family",
-  storageBucket: "fallguard-family.firebasestorage.app",
-  messagingSenderId: "543935846728",
-  appId: "1:543935846728:web:9bfe0c7e0e8da47f88bb7d"
+  apiKey: "นำค่าจาก firebase-config.js มาใส่",
+  authDomain: "backend-bb641.firebaseapp.com",
+  projectId: "backend-bb641",
+  storageBucket: "นำค่าจาก firebase-config.js มาใส่",
+  messagingSenderId: "นำค่าจาก firebase-config.js มาใส่",
+  appId: "นำค่าจาก firebase-config.js มาใส่"
 });
 
 const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage((payload) => {
-  const title = payload.notification?.title || "แจ้งเตือน";
+  console.log("ได้รับการแจ้งเตือนเบื้องหลัง:", payload);
+
+  const title =
+    payload.notification?.title ||
+    "FallGuard Family";
+
   const options = {
-    body: payload.notification?.body || "",
-    icon: "/icon.png",
+    body:
+      payload.notification?.body ||
+      "มีการแจ้งเตือนใหม่",
+    icon: "./icon-192.png",
+    data: payload.data || {}
   };
+
   self.registration.showNotification(title, options);
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+
+  event.waitUntil(
+    clients.openWindow("./dashboard.html")
+  );
 });
