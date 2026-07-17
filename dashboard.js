@@ -118,6 +118,7 @@ function showGroupPanel(groupId, groupName, inviteCode) {
   els.activeGroupName.textContent = groupName;
   els.activeInviteCode.textContent = inviteCode || "—";
   currentGroupId = groupId;
+  console.log("Dashboard Group:", groupId);
   listenForAlerts(groupId);
   listenForMedications(groupId);
   startPhoneCameraViewer(groupId);
