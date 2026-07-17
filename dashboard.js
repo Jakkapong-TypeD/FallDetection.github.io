@@ -875,6 +875,8 @@ function checkDueReminders() {
   });
 }
 
-setInterval(() => {
-  if (currentGroupId) checkDueReminders();
-}, 30000);
+setInterval(async () => {
+  if (currentGroupId) {
+    await checkDueReminders();
+  }
+}, 15000);
