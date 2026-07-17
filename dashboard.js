@@ -52,6 +52,7 @@ const els = {
 let currentUser = null;
 let unsubscribeAlerts = null;
 let unsubscribeMedications = null;
+let unsubscribeDeviceStatus = null;
 let currentGroupId = null;
 let medications = []; // แคชรายการยาล่าสุดจาก Firestore (sync กับทุกคนในกลุ่มแบบเรียลไทม์)
 let editingMedId = null;
