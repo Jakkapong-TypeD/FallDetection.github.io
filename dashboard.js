@@ -126,6 +126,7 @@ function showGroupPanel(groupId, groupName, inviteCode) {
   console.log("Dashboard Group:", groupId);
   listenForAlerts(groupId);
   listenForMedications(groupId);
+  listenForDeviceStatus();
   startPhoneCameraViewer(groupId);
   addLeaveGroupButton(groupId);
 }
