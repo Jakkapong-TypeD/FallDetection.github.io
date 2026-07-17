@@ -536,7 +536,36 @@ onMessage(messaging, async (payload) => {
     );
   }
 });
-// ---------- Alert history (realtime) ----------
+
+function listenForDeviceStatus() {
+  if (unsubscribeDeviceStatus) {
+    unsubscribeDeviceStatus();
+    unsubscribeDeviceStatus = null;
+  }
+
+  const statusRef = doc(db, "device_status", "living-room-cam-01");
+
+  unsubscribeDeviceStatus = onSnapshot(statusRef, (snapshot) => {
+    if (!snapshot.exists()) {
+      els.postureStatus.textContent = "⚪ ไม่ทราบสถานะ";
+      return;
+    }
+
+    const data = snapshot.data();
+
+    const postureText = {
+      standing: "🧍 ยืน",
+      sitting: "🪑 นั่ง",
+      lying: "🛏️ นอน",
+      falling: "🚨 กำลังล้ม",
+      unknown: "⚪ ไม่ทราบสถานะ",
+    };
+
+    els.postureStatus.textContent =
+      postureText[data.posture] || "⚪ ไม่ทราบสถานะ";
+  });
+}
+
 function listenForAlerts(groupId) {
   if (unsubscribeAlerts) {
     unsubscribeAlerts();
