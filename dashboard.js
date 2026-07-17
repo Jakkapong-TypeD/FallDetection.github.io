@@ -29,7 +29,8 @@ const els = {
   cameraOffline: document.getElementById("camera-offline"),
   cameraDeviceLabel: document.getElementById("camera-device-label"),
   camDot: document.getElementById("cam-dot"),
-
+  postureStatus: document.getElementById("posture-status"),
+  
   // แจ้งเตือนการกินยา
   btnAddMed: document.getElementById("btn-add-med"),
   medList: document.getElementById("med-list"),
