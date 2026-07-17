@@ -7,13 +7,14 @@ importScripts(
 );
 
 firebase.initializeApp({
-  apiKey: "นำค่าจาก firebase-config.js มาใส่",
+  apiKey: "AIzaSyCMj60KjASvUXzbZlmdGcaAn7ARAef0aGw",
   authDomain: "backend-bb641.firebaseapp.com",
   projectId: "backend-bb641",
-  storageBucket: "นำค่าจาก firebase-config.js มาใส่",
-  messagingSenderId: "นำค่าจาก firebase-config.js มาใส่",
-  appId: "นำค่าจาก firebase-config.js มาใส่"
-});
+  storageBucket: "backend-bb641.firebasestorage.app",
+  messagingSenderId: "209525644712",
+  appId: "1:209525644712:web:17d4c203e63fb4f14d919d",
+  measurementId: "G-7V9MXVPS8Y"
+};ห
 
 const messaging = firebase.messaging();
 
