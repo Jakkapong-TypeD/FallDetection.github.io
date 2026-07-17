@@ -69,6 +69,7 @@ async function findGroup() {
     }
     const groupDoc = snapshot.docs[0];
     currentGroupId = groupDoc.id;
+    console.log("Phone Group:", currentGroupId);
     els.groupName.textContent = groupDoc.data().group_name || "—";
     els.btnStart.disabled = false;
   } catch (err) {
