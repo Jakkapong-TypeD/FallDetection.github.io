@@ -1,3 +1,17 @@
+// phone-camera.js
+// -----------------
+// หน้านี้เปิดจากมือถือ ขอสิทธิ์กล้อง (getUserMedia) แล้วส่งภาพแบบสด
+// ไปให้ทุกคนที่เปิด dashboard.html ในกลุ่มบ้านเดียวกันดู ผ่าน WebRTC
+// (peer-to-peer โดยตรง ไม่ผ่าน backend) โดยใช้ Firestore เป็นช่องทาง
+// "ต่อสาย" (signaling): ฝั่งนี้เขียน SDP offer ลง Firestore แล้วรอ
+// dashboard.js (ฝั่งดู) เขียน SDP answer กลับมา จากนั้นแลก ICE
+// candidate กันผ่าน subcollection จนกว่าจะต่อวิดีโอกันติด
+//
+// ต้องเพิ่ม Firestore Security Rule ให้ collection "camera_sessions"
+// (และ subcollection offerCandidates / answerCandidates) อนุญาตให้
+// สมาชิกในกลุ่มอ่าน/เขียนได้ — แพทเทิร์นเดียวกับที่ทำไว้ให้ collection
+// "medications" ก่อนหน้านี้
+
 import { auth, db } from "./firebase-config.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
