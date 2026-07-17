@@ -846,14 +846,45 @@ async function deleteMed(medId) {
     alert("ลบรายการยาไม่สำเร็จ: " + err.message);
   }
 }
+async function showMedicationNotification(title, body) {
+  if (!("Notification" in window)) {
+    console.error("เบราว์เซอร์ไม่รองรับ Notification");
+    return false;
+  }
 
-// ---------- ตรวจสอบเวลาที่ต้องแจ้งเตือน ----------
-// หมายเหตุ: นี่คือการแจ้งเตือนฝั่ง client (ใช้ได้เมื่อเปิดแท็บนี้ค้างไว้
-// และกดปุ่ม "เปิดการแจ้งเตือน" อนุญาต permission ไปแล้วเท่านั้น)
-// ถ้าต้องการ push แจ้งเตือนไปหาทุกคนในกลุ่มแม้ปิดแอปอยู่ (เหมือนที่ระบบ
-// แจ้งเตือนการล้มทำผ่าน FCM) ต้องมี Cloud Function ฝั่ง backend คอย
-// เช็คตารางยาเป็นระยะแล้วยิง FCM ไปยัง fcm_token ของสมาชิกกลุ่ม —
-// ส่วนนี้ผมยังไม่เห็นโค้ด backend จึงยังทำให้ไม่ได้ในตอนนี้ครับ
+  if (Notification.permission !== "granted") {
+    console.warn(
+      "ยังไม่ได้อนุญาต Notification:",
+      Notification.permission
+    );
+    return false;
+  }
+
+  try {
+    if ("serviceWorker" in navigator) {
+      const registration =
+        await navigator.serviceWorker.ready;
+
+      await registration.showNotification(title, {
+        body,
+        tag: "medication-reminder",
+        renotify: true,
+        data: {
+          url: "./dashboard.html",
+        },
+      });
+    } else {
+      new Notification(title, {
+        body,
+      });
+    }
+
+    return true;
+  } catch (err) {
+    console.error("แจ้งเตือนกินยาไม่สำเร็จ:", err);
+    return false;
+  }
+}
 async function checkDueReminders() {
   const nowMin = minutesNow();
   const today = todayStr();
