@@ -854,25 +854,79 @@ async function deleteMed(medId) {
 // แจ้งเตือนการล้มทำผ่าน FCM) ต้องมี Cloud Function ฝั่ง backend คอย
 // เช็คตารางยาเป็นระยะแล้วยิง FCM ไปยัง fcm_token ของสมาชิกกลุ่ม —
 // ส่วนนี้ผมยังไม่เห็นโค้ด backend จึงยังทำให้ไม่ได้ในตอนนี้ครับ
-function checkDueReminders() {
+async function checkDueReminders() {
   const nowMin = minutesNow();
   const today = todayStr();
 
-  medications.forEach((med) => {
-    const takenToday = (med.taken && med.taken[today]) || {};
-    getDoseSlots(med).forEach((s) => {
-      const t = toMinutes(s.time);
-      if (t === null) return;
-      const key = `${med.id}_${s.slotId}_${today}`;
-      if (!takenToday[s.slotId] && !notifiedThisSession[key] && nowMin >= t && nowMin - t <= 5) {
-        notifiedThisSession[key] = true;
-        const msg = `ถึงเวลากินยา "${med.name}" (${s.label})`;
-        if (window.Notification && Notification.permission === "granted") {
-          new Notification("FallGuard Family — แจ้งเตือนกินยา", { body: msg });
+  console.log(
+    "กำลังตรวจเวลาแจ้งเตือนยา:",
+    new Date().toLocaleString("th-TH"),
+    "นาทีปัจจุบัน:",
+    nowMin
+  );
+
+  for (const med of medications) {
+    const takenToday =
+      (med.taken && med.taken[today]) || {};
+
+    const slots = getDoseSlots(med);
+
+    for (const slot of slots) {
+      const scheduledMin = toMinutes(slot.time);
+
+      if (scheduledMin === null) {
+        continue;
+      }
+
+      const notificationKey =
+        `${med.id}_${slot.slotId}_${today}`;
+
+      const minutesLate =
+        nowMin - scheduledMin;
+
+      console.log("ตรวจยา:", {
+        name: med.name,
+        time: slot.time,
+        nowMin,
+        scheduledMin,
+        minutesLate,
+        taken: !!takenToday[slot.slotId],
+        notified: !!notifiedThisSession[notificationKey],
+      });
+
+      // แจ้งตั้งแต่ถึงเวลาไปจนถึง 15 นาทีหลังเวลานัด
+      const isDue =
+        minutesLate >= 0 &&
+        minutesLate <= 15;
+
+      const notTaken =
+        !takenToday[slot.slotId];
+
+      const notNotified =
+        !notifiedThisSession[notificationKey];
+
+      if (isDue && notTaken && notNotified) {
+        const message =
+          `ถึงเวลากินยา "${med.name}" ` +
+          `เวลา ${slot.time} น. (${slot.label})`;
+
+        const success =
+          await showMedicationNotification(
+            "FallGuard Family — แจ้งเตือนกินยา",
+            message
+          );
+
+        if (success) {
+          notifiedThisSession[notificationKey] = true;
+
+          console.log(
+            "แจ้งเตือนกินยาสำเร็จ:",
+            med.name
+          );
         }
       }
-    });
-  });
+    }
+  }
 }
 
 setInterval(async () => {
