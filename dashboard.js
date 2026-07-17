@@ -3,7 +3,8 @@ import { auth, db, messaging, VAPID_KEY, BACKEND_URL } from "./firebase-config.j
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   collection, query, where, orderBy, limit, onSnapshot, getDocs,
-  addDoc, doc, updateDoc, deleteDoc, serverTimestamp, increment
+  addDoc, doc, updateDoc, deleteDoc, serverTimestamp, increment,
+  setDoc, getDoc
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getToken, onMessage } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js";
 
@@ -24,7 +25,9 @@ const els = {
 
   // กล้อง
   cameraFeed: document.getElementById("camera-feed"),
+  cameraFeedRemote: document.getElementById("camera-feed-remote"),
   cameraOffline: document.getElementById("camera-offline"),
+  cameraDeviceLabel: document.getElementById("camera-device-label"),
   camDot: document.getElementById("cam-dot"),
 
   // แจ้งเตือนการกินยา
@@ -103,7 +106,7 @@ function resetGroupView() {
   }
   currentGroupId = null;
   medications = [];
-  stopStream();
+  stopPhoneCameraViewer();
   els.panelGroup.hidden = true;
   els.panelNoGroup.hidden = false;
   els.groupStatus.hidden = true;
@@ -117,7 +120,7 @@ function showGroupPanel(groupId, groupName, inviteCode) {
   currentGroupId = groupId;
   listenForAlerts(groupId);
   listenForMedications(groupId);
-  startStream(groupId);
+  startPhoneCameraViewer(groupId);
   addLeaveGroupButton(groupId);
 }
 
@@ -203,47 +206,161 @@ function addLeaveGroupButton(groupId) {
 }
 
 // ---------- กล้องวงจรปิด ----------
-// หมายเหตุ: เดิม STREAM_URL ผูกไว้กับ http://localhost:8000 ตรงๆ ซึ่งจะเห็น
-// ภาพได้เฉพาะตอนเปิดหน้านี้ "บนเครื่องเดียวกัน" กับที่รัน camera_stream.py
-// เท่านั้น สมาชิกครอบครัวคนอื่นที่ล็อกอินจากที่อื่นจะไม่เห็นภาพเลย
-// ด้านล่างนี้เปลี่ยนให้ดึงจาก BACKEND_URL (ใช้ตัวเดียวกับ endpoint อื่นๆ)
-// พร้อมแนบ group_id เพื่อให้ backend รู้ว่าต้อง proxy กล้องตัวไหนของกลุ่มไหน
-// แต่ทั้งนี้ backend เองก็ต้องรันอยู่ในที่ที่ทุกคนเข้าถึงได้ทางอินเทอร์เน็ต
-// (ไม่ใช่ localhost) และต้องมี route ที่ map group_id -> กล้องจริงด้วย
-// ผมยังไม่เห็นโค้ด backend เลยแก้ให้แค่ฝั่ง frontend ตรงนี้ก่อนครับ
+// ตอนนี้ยังไม่มีกล้อง IP จริง เลยใช้ "กล้องมือถือ" เป็นแหล่งภาพชั่วคราว
+// วิธีทำงาน: มือถือเปิดหน้า phone-camera.html แล้วขอสิทธิ์กล้อง จากนั้น
+// ส่ง SDP offer + ICE candidates ผ่าน Firestore (collection
+// "camera_sessions", doc id = group_id) เป็นช่องทาง "ต่อสาย" (signaling)
+// ให้ทุกคนที่เปิดหน้า dashboard ในกลุ่มเดียวกัน (viewer) รับสายแล้วต่อ
+// วิดีโอกันตรงๆ แบบ peer-to-peer (WebRTC) — ไม่ต้องผ่าน backend เลย
+//
+// ข้อจำกัด: ใช้ STUN สาธารณะของ Google เท่านั้น (ฟรี ไม่มี TURN) ถ้ามือถือ
+// กับคนดูอยู่คนละเครือข่ายที่ NAT/ไฟร์วอลล์เข้มงวดมาก อาจต่อกันไม่ติด —
+// เหมาะกับใช้ชั่วคราวในบ้าน/เครือข่ายเดียวกันก่อน ถ้าจะให้เสถียรขึ้นค่อยหา
+// TURN server (เช่น Twilio, coturn ของตัวเอง) มาใส่เพิ่มทีหลังได้
+//
+// ต้องเพิ่ม Firestore Security Rule ให้ collection "camera_sessions" และ
+// subcollection ของมันด้วย (แพทเทิร์นเดียวกับ medications ที่ทำไว้ก่อนหน้า)
+const rtcServers = {
+  iceServers: [
+    { urls: ["stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] },
+  ],
+  iceCandidatePoolSize: 10,
+};
+
+let cameraPc = null;
+let unsubscribeCameraSession = null;
+let unsubscribeOfferCandidates = null;
+
+function showCameraSource(source) {
+  // source: "phone" (กำลังรับภาพจากมือถือ) | "offline" (ยังไม่มีใคร broadcast)
+  if (source === "phone") {
+    els.cameraFeedRemote.style.display = "block";
+    els.cameraFeed.style.display = "none";
+    els.cameraOffline.classList.remove("show");
+    els.camDot.classList.add("online");
+    els.cameraDeviceLabel.textContent = "📱 กล้องจากมือถือ";
+  } else {
+    els.cameraFeedRemote.style.display = "none";
+    els.cameraFeed.style.display = "none";
+    els.cameraOffline.classList.add("show");
+    els.camDot.classList.remove("online");
+    els.cameraDeviceLabel.textContent = "ยังไม่ได้เชื่อมต่อ";
+  }
+}
+
+function startPhoneCameraViewer(groupId) {
+  stopPhoneCameraViewer();
+  if (!groupId) return;
+
+  showCameraSource("offline");
+
+  cameraPc = new RTCPeerConnection(rtcServers);
+  const remoteStream = new MediaStream();
+  els.cameraFeedRemote.srcObject = remoteStream;
+
+  cameraPc.ontrack = (event) => {
+    event.streams[0].getTracks().forEach((track) => remoteStream.addTrack(track));
+    showCameraSource("phone");
+  };
+  cameraPc.onconnectionstatechange = () => {
+    if (cameraPc && (cameraPc.connectionState === "disconnected" || cameraPc.connectionState === "failed" || cameraPc.connectionState === "closed")) {
+      showCameraSource("offline");
+    }
+  };
+
+  const sessionRef = doc(db, "camera_sessions", groupId);
+  const offerCandidatesRef = collection(sessionRef, "offerCandidates");
+  const answerCandidatesRef = collection(sessionRef, "answerCandidates");
+
+  cameraPc.onicecandidate = (event) => {
+    if (event.candidate) addDoc(answerCandidatesRef, event.candidate.toJSON());
+  };
+
+  let answered = false;
+
+  unsubscribeCameraSession = onSnapshot(sessionRef, async (snap) => {
+    const data = snap.data();
+    if (!data || !data.offer) {
+      answered = false;
+      showCameraSource("offline");
+      return;
+    }
+    if (!answered && cameraPc) {
+      answered = true;
+      try {
+        await cameraPc.setRemoteDescription(new RTCSessionDescription(data.offer));
+        const answerDescription = await cameraPc.createAnswer();
+        await cameraPc.setLocalDescription(answerDescription);
+        await updateDoc(sessionRef, {
+          answer: { sdp: answerDescription.sdp, type: answerDescription.type },
+        });
+      } catch (err) {
+        console.error("เชื่อมต่อกล้องมือถือไม่สำเร็จ:", err);
+      }
+    }
+  });
+
+  unsubscribeOfferCandidates = onSnapshot(offerCandidatesRef, (snap) => {
+    snap.docChanges().forEach((change) => {
+      if (change.type === "added" && cameraPc) {
+        cameraPc.addIceCandidate(new RTCIceCandidate(change.doc.data())).catch(() => {});
+      }
+    });
+  });
+}
+
+function stopPhoneCameraViewer() {
+  if (unsubscribeCameraSession) {
+    unsubscribeCameraSession();
+    unsubscribeCameraSession = null;
+  }
+  if (unsubscribeOfferCandidates) {
+    unsubscribeOfferCandidates();
+    unsubscribeOfferCandidates = null;
+  }
+  if (cameraPc) {
+    cameraPc.close();
+    cameraPc = null;
+  }
+  els.cameraFeedRemote.srcObject = null;
+  showCameraSource("offline");
+}
+
+// ---------- (สำรองไว้สำหรับตอนมีกล้อง IP จริง) ----------
+// ถ้าอนาคตติดตั้งกล้อง IP จริงผ่าน camera_stream.py + backend แล้ว ให้เรียก
+// startMjpegStream(groupId) แทน startPhoneCameraViewer(groupId) ใน
+// showGroupPanel() ด้านบน (ฟังก์ชันนี้ยังไม่ได้ถูกเรียกใช้งานตอนนี้)
 let streamRetryTimer = null;
 
-function setCameraOnline() {
-  els.cameraOffline.classList.remove("show");
-  els.camDot.classList.add("online");
-}
-
-function setCameraOffline() {
-  els.cameraOffline.classList.add("show");
-  els.camDot.classList.remove("online");
-  if (streamRetryTimer) clearTimeout(streamRetryTimer);
-  streamRetryTimer = setTimeout(() => startStream(currentGroupId), 5000);
-}
-
-function startStream(groupId) {
+function startMjpegStream(groupId) {
   if (!groupId) return;
   const url = `${BACKEND_URL}/stream/video?group_id=${encodeURIComponent(groupId)}`;
+  els.cameraFeed.style.display = "block";
+  els.cameraFeedRemote.style.display = "none";
   els.cameraFeed.src = "";
   els.cameraFeed.src = url + "&t=" + Date.now();
 }
 
-function stopStream() {
+function stopMjpegStream() {
   if (streamRetryTimer) {
     clearTimeout(streamRetryTimer);
     streamRetryTimer = null;
   }
   els.cameraFeed.src = "";
-  els.cameraOffline.classList.add("show");
-  els.camDot.classList.remove("online");
 }
 
-els.cameraFeed.addEventListener("load", setCameraOnline);
-els.cameraFeed.addEventListener("error", setCameraOffline);
+els.cameraFeed.addEventListener("load", () => {
+  els.cameraOffline.classList.remove("show");
+  els.camDot.classList.add("online");
+  els.cameraDeviceLabel.textContent = "living-room-cam-01";
+});
+els.cameraFeed.addEventListener("error", () => {
+  els.cameraOffline.classList.add("show");
+  els.camDot.classList.remove("online");
+  if (streamRetryTimer) clearTimeout(streamRetryTimer);
+  streamRetryTimer = setTimeout(() => startMjpegStream(currentGroupId), 5000);
+});
+
 
 // ---------- Push notifications ----------
 els.btnNotify.addEventListener("click", async () => {
