@@ -16,7 +16,7 @@ const firebaseConfig = {
 };
 
 // เปลี่ยนเป็น VAPID Key ของโปรเจกต์ backend-bb641
-export const VAPID_KEY = "ใส่ VAPID KEY ของ backend-bb641";
+export const VAPID_KEY = "FIREBASE_SERVICE_ACCOUNT";
 
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
