@@ -12,9 +12,8 @@ firebase.initializeApp({
   projectId: "backend-bb641",
   storageBucket: "backend-bb641.firebasestorage.app",
   messagingSenderId: "209525644712",
-  appId: "1:209525644712:web:17d4c203e63fb4f14d919d",
-  measurementId: "G-7V9MXVPS8Y"
-};
+  appId: "1:209525644712:web:17d4c203e63fb4f14d919d"
+});
 
 const messaging = firebase.messaging();
 
@@ -29,7 +28,6 @@ messaging.onBackgroundMessage((payload) => {
     body:
       payload.notification?.body ||
       "มีการแจ้งเตือนใหม่",
-    icon: "./icon-192.png",
     data: payload.data || {}
   };
 
@@ -40,6 +38,8 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
 
   event.waitUntil(
-    clients.openWindow("./dashboard.html")
+    clients.openWindow(
+      "/FallDetection.github.io/dashboard.html"
+    )
   );
 });
