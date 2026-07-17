@@ -66,8 +66,11 @@ onAuthStateChanged(auth, async (user) => {
   els.userEmail.textContent = user.email;
   resetGroupView();
 
-  // เช็ค Firestore ก่อนว่า user นี้เป็น member ของกลุ่มไหนอยู่แล้วไหม
-  await loadGroupFromFirestore();
+ // เช็ค Firestore ก่อนว่า user นี้เป็น member ของกลุ่มไหนอยู่แล้วไหม
+await loadGroupFromFirestore();
+
+// ถ้าเคยอนุญาตแจ้งเตือนแล้ว ให้เปิดใช้งานอัตโนมัติ
+await setupNotifications(false);
 });
 
 els.btnLogout.addEventListener("click", () => signOut(auth));
