@@ -367,42 +367,173 @@ els.cameraFeed.addEventListener("error", () => {
 
 
 // ---------- Push notifications ----------
-els.btnNotify.addEventListener("click", async () => {
+// ---------- Push notifications ----------
+async function setupNotifications(requestPermission = false) {
   try {
-    const permission = await Notification.requestPermission();
-    if (permission !== "granted") {
-      alert("กรุณาอนุญาตการแจ้งเตือนในเบราว์เซอร์ เพื่อรับข่าวเมื่อมีเหตุการณ์ล้ม");
-      return;
+    if (!("Notification" in window)) {
+      throw new Error("เบราว์เซอร์นี้ไม่รองรับการแจ้งเตือน");
     }
 
-    const registration = await navigator.serviceWorker.register("./firebase-messaging-sw.js");
+    if (!("serviceWorker" in navigator)) {
+      throw new Error("เบราว์เซอร์นี้ไม่รองรับ Service Worker");
+    }
+
+    let permission = Notification.permission;
+
+    // ขอสิทธิ์เฉพาะตอนผู้ใช้กดปุ่ม
+    if (permission === "default" && requestPermission) {
+      permission = await Notification.requestPermission();
+    }
+
+    if (permission === "denied") {
+      els.btnNotify.textContent = "การแจ้งเตือนถูกบล็อก";
+      els.btnNotify.disabled = false;
+      return false;
+    }
+
+    if (permission !== "granted") {
+      els.btnNotify.textContent = "เปิดการแจ้งเตือน";
+      els.btnNotify.disabled = false;
+      return false;
+    }
+
+    const registration =
+      await navigator.serviceWorker.register(
+        "./firebase-messaging-sw.js"
+      );
+
     await navigator.serviceWorker.ready;
 
     const token = await getToken(messaging, {
       vapidKey: VAPID_KEY,
       serviceWorkerRegistration: registration,
     });
-    if (!token) throw new Error("no token");
 
-    await fetch(`${BACKEND_URL}/groups/register-device-token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: currentUser.uid, fcm_token: token }),
-    });
+    if (!token) {
+      throw new Error("ไม่สามารถสร้าง FCM Token ได้");
+    }
 
-    els.btnNotify.textContent = "เปิดการแจ้งเตือนแล้ว ✓";
+    console.log("FCM Token:", token);
+
+    const response = await fetch(
+      `${BACKEND_URL}/groups/register-device-token`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: currentUser.uid,
+          fcm_token: token,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+
+      throw new Error(
+        `Backend บันทึก Token ไม่สำเร็จ (${response.status}): ${errorText}`
+      );
+    }
+
+    els.btnNotify.textContent =
+      "เปิดการแจ้งเตือนแล้ว ✓";
+
     els.btnNotify.disabled = true;
+
+    return true;
   } catch (err) {
-    alert("เปิดการแจ้งเตือนไม่สำเร็จ: " + err.message);
+    console.error(
+      "ตั้งค่าการแจ้งเตือนไม่สำเร็จ:",
+      err
+    );
+
+    els.btnNotify.textContent =
+      "เปิดการแจ้งเตือน";
+
+    els.btnNotify.disabled = false;
+
+    if (requestPermission) {
+      alert(
+        "เปิดการแจ้งเตือนไม่สำเร็จ: " +
+        err.message
+      );
+    }
+
+    return false;
+  }
+}
+
+els.btnNotify.addEventListener("click", async () => {
+  const success =
+    await setupNotifications(true);
+
+  if (!success) {
+    if (Notification.permission === "denied") {
+      alert(
+        "เบราว์เซอร์บล็อกการแจ้งเตือนอยู่ กรุณากดรูปแม่กุญแจข้าง URL แล้วอนุญาต Notifications"
+      );
+    }
+
+    return;
+  }
+
+  try {
+    const registration =
+      await navigator.serviceWorker.ready;
+
+    await registration.showNotification(
+      "FallGuard Family",
+      {
+        body: "เปิดระบบแจ้งเตือนสำเร็จแล้ว",
+        data: {
+          url: "./dashboard.html",
+        },
+      }
+    );
+  } catch (err) {
+    console.error(
+      "แสดงการแจ้งเตือนทดสอบไม่สำเร็จ:",
+      err
+    );
   }
 });
 
-onMessage(messaging, (payload) => {
-  new Notification(payload.notification?.title || "แจ้งเตือน", {
-    body: payload.notification?.body || "",
-  });
-});
+onMessage(messaging, async (payload) => {
+  console.log(
+    "ได้รับข้อความขณะเปิดหน้าเว็บ:",
+    payload
+  );
 
+  const title =
+    payload.notification?.title ||
+    payload.data?.title ||
+    "FallGuard Family";
+
+  const body =
+    payload.notification?.body ||
+    payload.data?.body ||
+    "มีการแจ้งเตือนใหม่";
+
+  try {
+    const registration =
+      await navigator.serviceWorker.ready;
+
+    await registration.showNotification(
+      title,
+      {
+        body,
+        data: payload.data || {},
+      }
+    );
+  } catch (err) {
+    console.error(
+      "แสดงการแจ้งเตือนไม่สำเร็จ:",
+      err
+    );
+  }
+});
 // ---------- Alert history (realtime) ----------
 function listenForAlerts(groupId) {
   if (unsubscribeAlerts) {
